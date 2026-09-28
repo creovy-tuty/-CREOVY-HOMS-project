@@ -1,0 +1,23 @@
+{
+  "indexes": [
+    { "collectionGroup": "properties", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "workspaceId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" }] },
+    { "collectionGroup": "units", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "workspaceId", "order": "ASCENDING" }, { "fieldPath": "propertyId", "order": "ASCENDING" }, { "fieldPath": "status", "order": "ASCENDING" }] },
+    { "collectionGroup": "rentDues", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "workspaceId", "order": "ASCENDING" }, { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "dueDate", "order": "ASCENDING" }] },
+    { "collectionGroup": "rentPayments", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "workspaceId", "order": "ASCENDING" }, { "fieldPath": "rentDueId", "order": "ASCENDING" }, { "fieldPath": "paymentDate", "order": "ASCENDING" }] },
+    { "collectionGroup": "rentPayments", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "workspaceId", "order": "ASCENDING" }, { "fieldPath": "tenantId", "order": "ASCENDING" }, { "fieldPath": "paymentDate", "order": "DESCENDING" }] },
+    { "collectionGroup": "rentPayments", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "workspaceId", "order": "ASCENDING" }, { "fieldPath": "periodKey", "order": "ASCENDING" }, { "fieldPath": "paymentDate", "order": "DESCENDING" }] },
+    { "collectionGroup": "rentPayments", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "workspaceId", "order": "ASCENDING" }, { "fieldPath": "paymentDate", "order": "DESCENDING" }] },
+    { "collectionGroup": "receipts", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "workspaceId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" }] },
+    { "collectionGroup": "receipts", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "workspaceId", "order": "ASCENDING" }, { "fieldPath": "tenantId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" }] },
+    { "collectionGroup": "receipts", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "workspaceId", "order": "ASCENDING" }, { "fieldPath": "paymentId", "order": "ASCENDING" }] },
+    { "collectionGroup": "receipts", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "workspaceId", "order": "ASCENDING" }, { "fieldPath": "receiptNumber", "order": "ASCENDING" }] },
+    { "collectionGroup": "tenantLedger", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "workspaceId", "order": "ASCENDING" }, { "fieldPath": "tenantId", "order": "ASCENDING" }, { "fieldPath": "transactionDate", "order": "ASCENDING" }] },
+    { "collectionGroup": "tenantLedger", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "workspaceId", "order": "ASCENDING" }, { "fieldPath": "agreementId", "order": "ASCENDING" }, { "fieldPath": "transactionDate", "order": "ASCENDING" }] },
+    { "collectionGroup": "tenantLedger", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "workspaceId", "order": "ASCENDING" }, { "fieldPath": "periodKey", "order": "ASCENDING" }, { "fieldPath": "transactionDate", "order": "ASCENDING" }] },
+    { "collectionGroup": "tenantLedger", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "workspaceId", "order": "ASCENDING" }, { "fieldPath": "transactionDate", "order": "DESCENDING" }] },
+    { "collectionGroup": "workspaceMembers", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "status", "order": "ASCENDING" }] },
+    { "collectionGroup": "properties", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "workspaceId", "order": "ASCENDING" }, { "fieldPath": "code", "order": "ASCENDING" }] },
+    { "collectionGroup": "units", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "workspaceId", "order": "ASCENDING" }, { "fieldPath": "propertyId", "order": "ASCENDING" }, { "fieldPath": "name", "order": "ASCENDING" }] }
+  ],
+  "fieldOverrides": []
+}

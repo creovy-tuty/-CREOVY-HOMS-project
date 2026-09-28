@@ -1,0 +1,311 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function memberId(workspaceId) {
+      return workspaceId + "_" + request.auth.uid;
+    }
+
+    function membership(workspaceId) {
+      return get(/databases/$(database)/documents/workspaceMembers/$(memberId(workspaceId)));
+    }
+
+    function isMember(workspaceId) {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/workspaceMembers/$(memberId(workspaceId))) &&
+        membership(workspaceId).data.workspaceId == workspaceId &&
+        membership(workspaceId).data.userId == request.auth.uid &&
+        membership(workspaceId).data.status == "active";
+    }
+
+    function hasRole(workspaceId, roles) {
+      return isMember(workspaceId) && membership(workspaceId).data.role in roles;
+    }
+
+    function immutableWorkspace() {
+      return request.resource.data.workspaceId == resource.data.workspaceId;
+    }
+
+    function validWorkspaceDocument() {
+      return request.resource.data.workspaceId is string && request.resource.data.workspaceId.size() > 0;
+    }
+
+    function validUnitProperty() {
+      return request.resource.data.propertyId is string &&
+        existsAfter(/databases/$(database)/documents/properties/$(request.resource.data.propertyId)) &&
+        getAfter(/databases/$(database)/documents/properties/$(request.resource.data.propertyId)).data.workspaceId == request.resource.data.workspaceId;
+    }
+
+    function agreementControlsOccupancy(unitId) {
+      return request.resource.data.activeAgreementId is string &&
+        existsAfter(/databases/$(database)/documents/rentalAgreements/$(request.resource.data.activeAgreementId)) &&
+        getAfter(/databases/$(database)/documents/rentalAgreements/$(request.resource.data.activeAgreementId)).data.status == "active" &&
+        getAfter(/databases/$(database)/documents/rentalAgreements/$(request.resource.data.activeAgreementId)).data.unitId == unitId &&
+        getAfter(/databases/$(database)/documents/rentalAgreements/$(request.resource.data.activeAgreementId)).data.workspaceId == resource.data.workspaceId;
+    }
+
+    function validRentDueRelationship() {
+      return request.resource.data.agreementId is string &&
+        exists(/databases/$(database)/documents/rentalAgreements/$(request.resource.data.agreementId)) &&
+        get(/databases/$(database)/documents/rentalAgreements/$(request.resource.data.agreementId)).data.workspaceId == request.resource.data.workspaceId &&
+        get(/databases/$(database)/documents/rentalAgreements/$(request.resource.data.agreementId)).data.tenantId == request.resource.data.tenantId &&
+        get(/databases/$(database)/documents/rentalAgreements/$(request.resource.data.agreementId)).data.propertyId == request.resource.data.propertyId &&
+        get(/databases/$(database)/documents/rentalAgreements/$(request.resource.data.agreementId)).data.unitId == request.resource.data.unitId;
+    }
+
+    function immutableRentDueSnapshot() {
+      return request.resource.data.workspaceId == resource.data.workspaceId &&
+        request.resource.data.agreementId == resource.data.agreementId &&
+        request.resource.data.tenantId == resource.data.tenantId &&
+        request.resource.data.propertyId == resource.data.propertyId &&
+        request.resource.data.unitId == resource.data.unitId &&
+        request.resource.data.periodKey == resource.data.periodKey &&
+        request.resource.data.rentYear == resource.data.rentYear &&
+        request.resource.data.rentMonth == resource.data.rentMonth &&
+        request.resource.data.dueDate == resource.data.dueDate &&
+        request.resource.data.rentAmountPaise == resource.data.rentAmountPaise;
+    }
+
+    function validPaymentDue(documentId) {
+      let payment = request.resource.data;
+      let before = get(/databases/$(database)/documents/rentDues/$(payment.rentDueId)).data;
+      let after = getAfter(/databases/$(database)/documents/rentDues/$(payment.rentDueId)).data;
+      return payment.rentDueId is string &&
+        exists(/databases/$(database)/documents/rentDues/$(payment.rentDueId)) &&
+        payment.submissionId == documentId &&
+        before.workspaceId == payment.workspaceId &&
+        before.agreementId == payment.agreementId &&
+        before.tenantId == payment.tenantId &&
+        before.propertyId == payment.propertyId &&
+        before.unitId == payment.unitId &&
+        before.periodKey == payment.periodKey &&
+        before.balancePaise >= payment.amountPaise &&
+        before.totalPaidPaise >= 0 &&
+        before.totalPaidPaise + before.balancePaise == before.rentAmountPaise &&
+        ((before.totalPaidPaise == 0 && before.status in ["pending", "overdue"]) ||
+          (before.totalPaidPaise > 0 && before.status == "partial")) &&
+        after.totalPaidPaise == before.totalPaidPaise + payment.amountPaise &&
+        after.balancePaise == before.balancePaise - payment.amountPaise &&
+        after.status == (after.balancePaise == 0 ? "paid" : "partial") &&
+        after.workspaceId == before.workspaceId;
+    }
+
+    function validPaymentDueUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["totalPaidPaise", "balancePaise", "status", "updatedAt"]) &&
+        resource.data.totalPaidPaise is int && resource.data.balancePaise is int &&
+        resource.data.totalPaidPaise + resource.data.balancePaise == resource.data.rentAmountPaise &&
+        request.resource.data.totalPaidPaise is int && request.resource.data.balancePaise is int &&
+        request.resource.data.totalPaidPaise > resource.data.totalPaidPaise &&
+        request.resource.data.balancePaise >= 0 &&
+        request.resource.data.balancePaise < resource.data.balancePaise &&
+        request.resource.data.totalPaidPaise + request.resource.data.balancePaise == resource.data.rentAmountPaise &&
+        request.resource.data.status == (request.resource.data.balancePaise == 0 ? "paid" : "partial") &&
+        request.resource.data.updatedAt == request.time;
+    }
+
+    function rentLedgerId(paymentId) {
+      return "rent_payment_" + paymentId;
+    }
+
+    function validPaymentBundle(paymentId) {
+      return !exists(/databases/$(database)/documents/receipts/$(paymentId)) &&
+        !exists(/databases/$(database)/documents/tenantLedger/$(rentLedgerId(paymentId))) &&
+        existsAfter(/databases/$(database)/documents/receipts/$(paymentId)) &&
+        existsAfter(/databases/$(database)/documents/tenantLedger/$(rentLedgerId(paymentId)));
+    }
+
+    function matchesPayment(record, payment) {
+      return record.workspaceId == payment.workspaceId &&
+        record.paymentId == payment.submissionId &&
+        record.rentDueId == payment.rentDueId &&
+        record.agreementId == payment.agreementId &&
+        record.tenantId == payment.tenantId &&
+        record.propertyId == payment.propertyId &&
+        record.unitId == payment.unitId &&
+        record.periodKey == payment.periodKey &&
+        record.amountPaise == payment.amountPaise &&
+        record.paymentMode == payment.paymentMode &&
+        record.referenceNumber == payment.referenceNumber &&
+        record.createdBy == payment.createdBy;
+    }
+
+    function validReceipt(documentId) {
+      let receipt = request.resource.data;
+      let payment = getAfter(/databases/$(database)/documents/rentPayments/$(documentId)).data;
+      return receipt.keys().hasAll(["workspaceId", "receiptNumber", "paymentId", "rentDueId", "agreementId", "tenantId", "tenantName", "propertyId", "propertyName", "unitId", "unitName", "periodKey", "amountPaise", "paymentDate", "paymentMode", "referenceNumber", "createdBy", "createdAt"]) &&
+        receipt.keys().hasOnly(["workspaceId", "receiptNumber", "paymentId", "rentDueId", "agreementId", "tenantId", "tenantName", "propertyId", "propertyName", "unitId", "unitName", "periodKey", "amountPaise", "paymentDate", "paymentMode", "referenceNumber", "createdBy", "createdAt"]) &&
+        receipt.paymentId == documentId && receipt.receiptNumber == "CRV-R-" + documentId &&
+        receipt.receiptNumber.size() <= 50 && receipt.referenceNumber is string && receipt.referenceNumber.size() <= 200 &&
+        receipt.tenantName is string && receipt.tenantName.size() > 0 && receipt.tenantName.size() <= 200 &&
+        receipt.propertyName is string && receipt.propertyName.size() > 0 && receipt.propertyName.size() <= 200 &&
+        receipt.unitName is string && receipt.unitName.size() > 0 && receipt.unitName.size() <= 200 &&
+        receipt.paymentDate is timestamp && receipt.amountPaise is int && receipt.amountPaise > 0 &&
+        receipt.createdBy == request.auth.uid && receipt.createdAt == request.time &&
+        !exists(/databases/$(database)/documents/rentPayments/$(documentId)) &&
+        existsAfter(/databases/$(database)/documents/rentPayments/$(documentId)) &&
+        matchesPayment(receipt, payment) && receipt.paymentDate == payment.paymentDate &&
+        get(/databases/$(database)/documents/tenants/$(receipt.tenantId)).data.workspaceId == receipt.workspaceId &&
+        get(/databases/$(database)/documents/tenants/$(receipt.tenantId)).data.fullName == receipt.tenantName &&
+        get(/databases/$(database)/documents/properties/$(receipt.propertyId)).data.workspaceId == receipt.workspaceId &&
+        get(/databases/$(database)/documents/properties/$(receipt.propertyId)).data.name == receipt.propertyName &&
+        get(/databases/$(database)/documents/units/$(receipt.unitId)).data.workspaceId == receipt.workspaceId &&
+        get(/databases/$(database)/documents/units/$(receipt.unitId)).data.name == receipt.unitName;
+    }
+
+    function validRentLedger(documentId) {
+      let ledger = request.resource.data;
+      let payment = getAfter(/databases/$(database)/documents/rentPayments/$(ledger.paymentId)).data;
+      return ledger.keys().hasAll(["workspaceId", "tenantId", "agreementId", "propertyId", "unitId", "rentDueId", "paymentId", "receiptId", "periodKey", "entryType", "amountPaise", "transactionDate", "paymentMode", "referenceNumber", "description", "createdBy", "createdAt"]) &&
+        ledger.keys().hasOnly(["workspaceId", "tenantId", "agreementId", "propertyId", "unitId", "rentDueId", "paymentId", "receiptId", "periodKey", "entryType", "amountPaise", "transactionDate", "paymentMode", "referenceNumber", "description", "createdBy", "createdAt"]) &&
+        ledger.paymentId is string && documentId == "rent_payment_" + ledger.paymentId &&
+        ledger.receiptId == ledger.paymentId && ledger.entryType == "rent_payment" &&
+        ledger.description == "Rent payment for " + ledger.periodKey && ledger.description.size() <= 128 &&
+        ledger.referenceNumber is string && ledger.referenceNumber.size() <= 200 &&
+        ledger.transactionDate is timestamp && ledger.amountPaise is int && ledger.amountPaise > 0 &&
+        ledger.createdBy == request.auth.uid && ledger.createdAt == request.time &&
+        !exists(/databases/$(database)/documents/rentPayments/$(ledger.paymentId)) &&
+        existsAfter(/databases/$(database)/documents/rentPayments/$(ledger.paymentId)) &&
+        existsAfter(/databases/$(database)/documents/receipts/$(ledger.receiptId)) &&
+        matchesPayment(ledger, payment) && ledger.transactionDate == payment.paymentDate &&
+        getAfter(/databases/$(database)/documents/receipts/$(ledger.receiptId)).data.paymentId == ledger.paymentId;
+    }
+
+    // Profiles are private. Membership and roles, rather than profile fields,
+    // authorize every workspace resource.
+    match /users/{userId} {
+      allow create: if signedIn() && userId == request.auth.uid && request.resource.data.uid == request.auth.uid;
+      allow read: if signedIn() && userId == request.auth.uid;
+      allow update: if signedIn() && userId == request.auth.uid && request.resource.data.uid == resource.data.uid;
+      allow delete: if false;
+
+      // Private device-token registry for future FCM registration. Notification
+      // delivery itself will be performed by trusted Cloud Functions.
+      match /devices/{deviceId} {
+        allow read, create, update, delete: if signedIn() && userId == request.auth.uid;
+      }
+    }
+
+    match /workspaces/{workspaceId} {
+      // Workspace and creator membership must be created atomically in one batch.
+      allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid && request.resource.data.status == "active";
+      allow read: if isMember(workspaceId);
+      allow update: if hasRole(workspaceId, ["owner"]) && request.resource.data.ownerId == resource.data.ownerId;
+      allow delete: if false;
+    }
+
+    match /workspaceMembers/{membershipId} {
+      allow read: if signedIn() && (
+        resource.data.userId == request.auth.uid ||
+        hasRole(resource.data.workspaceId, ["owner", "manager"])
+      );
+
+      // Creator membership is allowed only alongside its new owner workspace.
+      allow create: if signedIn() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.role == "owner" &&
+        request.resource.data.status == "active" &&
+        membershipId == request.resource.data.workspaceId + "_" + request.auth.uid &&
+        existsAfter(/databases/$(database)/documents/workspaces/$(request.resource.data.workspaceId)) &&
+        getAfter(/databases/$(database)/documents/workspaces/$(request.resource.data.workspaceId)).data.ownerId == request.auth.uid;
+
+      // Other members can only be administered by the workspace owner.
+      allow create: if signedIn() &&
+        membershipId == request.resource.data.workspaceId + "_" + request.resource.data.userId &&
+        request.resource.data.role in ["manager", "accountant", "viewer"] &&
+        request.resource.data.status in ["active", "invited", "suspended"] &&
+        hasRole(request.resource.data.workspaceId, ["owner"]);
+      allow update: if signedIn() &&
+        resource.data.workspaceId == request.resource.data.workspaceId &&
+        resource.data.userId == request.resource.data.userId &&
+        resource.data.role == request.resource.data.role &&
+        hasRole(resource.data.workspaceId, ["owner"]);
+      allow delete: if false;
+    }
+
+    // Workspace data documents all carry workspaceId; roles distinguish edits
+    // from read-only access. Add per-document relationship checks in Cloud
+    // Functions as V1 workflows grow.
+    match /properties/{documentId} {
+      allow read: if isMember(resource.data.workspaceId);
+      allow create: if validWorkspaceDocument() && hasRole(request.resource.data.workspaceId, ["owner", "manager"]);
+      allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager"]);
+      allow delete: if hasRole(resource.data.workspaceId, ["owner"]);
+    }
+    match /units/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && validUnitProperty() && request.resource.data.status == "vacant" && hasRole(request.resource.data.workspaceId, ["owner", "manager"]); allow update: if immutableWorkspace() && request.resource.data.propertyId == resource.data.propertyId && validUnitProperty() && ((request.resource.data.status != "occupied" && resource.data.status != "occupied") || (request.resource.data.status == "occupied" && agreementControlsOccupancy(documentId)) || (resource.data.status == "occupied" && request.resource.data.status == "vacant" && resource.data.activeAgreementId is string && getAfter(/databases/$(database)/documents/rentalAgreements/$(resource.data.activeAgreementId)).data.status in ["ended", "cancelled"])) && hasRole(resource.data.workspaceId, ["owner", "manager"]); allow delete: if hasRole(resource.data.workspaceId, ["owner"]); }
+    match /tenants/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && request.resource.data.status in ["active", "inactive"] && hasRole(request.resource.data.workspaceId, ["owner", "manager"]); allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager"]); allow delete: if false; }
+    match /rentalAgreements/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && request.resource.data.status in ["draft", "upcoming"] && hasRole(request.resource.data.workspaceId, ["owner", "manager"]); allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager"]); allow delete: if false; }
+    match /rentDues/{documentId} {
+      allow read: if isMember(resource.data.workspaceId);
+      allow create: if validWorkspaceDocument() && validRentDueRelationship() &&
+        documentId == request.resource.data.agreementId + "_" + request.resource.data.periodKey &&
+        request.resource.data.periodKey is string &&
+        request.resource.data.rentYear is int && request.resource.data.rentMonth is int &&
+        request.resource.data.rentMonth >= 1 && request.resource.data.rentMonth <= 12 &&
+        request.resource.data.periodKey.matches('^[0-9]{4}-(0[1-9]|1[0-2])$') &&
+        request.resource.data.rentAmountPaise is int && request.resource.data.rentAmountPaise >= 0 &&
+        request.resource.data.totalPaidPaise == 0 &&
+        request.resource.data.balancePaise == request.resource.data.rentAmountPaise &&
+        request.resource.data.status in ["pending", "overdue"] &&
+        hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]);
+      allow update: if immutableRentDueSnapshot() &&
+        hasRole(resource.data.workspaceId, ["owner", "manager", "accountant"]) &&
+        ((request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "updatedAt"]) &&
+          resource.data.status == "pending" && request.resource.data.status == "overdue" &&
+          resource.data.balancePaise > 0 && request.time > resource.data.dueDate &&
+          request.resource.data.updatedAt == request.time) ||
+          validPaymentDueUpdate());
+      allow delete: if false;
+    }
+
+    // Financial movements are append-only: partial payments can never be overwritten.
+    match /rentPayments/{documentId} {
+      // A transaction must be able to read its not-yet-created UUID document.
+      // Existing payment data remains readable only to its workspace members.
+      allow get: if signedIn() && (resource == null || isMember(resource.data.workspaceId));
+      allow list: if isMember(resource.data.workspaceId);
+      allow create: if validWorkspaceDocument() &&
+        hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]) &&
+        request.resource.data.keys().hasAll(["submissionId", "workspaceId", "rentDueId", "agreementId", "tenantId", "propertyId", "unitId", "periodKey", "amountPaise", "paymentDate", "paymentMode", "referenceNumber", "notes", "createdBy", "createdAt"]) &&
+        request.resource.data.keys().hasOnly(["submissionId", "workspaceId", "rentDueId", "agreementId", "tenantId", "propertyId", "unitId", "periodKey", "amountPaise", "paymentDate", "paymentMode", "referenceNumber", "notes", "createdBy", "createdAt"]) &&
+        documentId.matches('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$') &&
+        request.resource.data.amountPaise is int && request.resource.data.amountPaise > 0 &&
+        request.resource.data.amountPaise <= 9007199254740991 &&
+        request.resource.data.paymentDate is timestamp &&
+        request.resource.data.paymentMode in ["cash", "upi", "bank_transfer", "cheque", "other"] &&
+        request.resource.data.referenceNumber is string && request.resource.data.referenceNumber.size() <= 200 &&
+        request.resource.data.notes is string && request.resource.data.notes.size() <= 2000 &&
+        request.resource.data.createdBy == request.auth.uid &&
+        request.resource.data.createdAt == request.time &&
+        validPaymentDue(documentId) && validPaymentBundle(documentId);
+      allow update, delete: if false;
+    }
+    match /receipts/{documentId} {
+      allow get: if signedIn() && (resource == null || isMember(resource.data.workspaceId));
+      allow list: if isMember(resource.data.workspaceId);
+      allow create: if validWorkspaceDocument() &&
+        hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]) &&
+        validReceipt(documentId);
+      allow update, delete: if false;
+    }
+    match /tenantLedger/{documentId} {
+      allow get: if signedIn() && (resource == null || isMember(resource.data.workspaceId));
+      allow list: if isMember(resource.data.workspaceId);
+      allow create: if validWorkspaceDocument() &&
+        hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]) &&
+        validRentLedger(documentId);
+      allow update, delete: if false;
+    }
+    match /securityDeposits/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]); allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager", "accountant"]); allow delete: if hasRole(resource.data.workspaceId, ["owner"]); }
+    match /ebBills/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]); allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager", "accountant"]); allow delete: if hasRole(resource.data.workspaceId, ["owner"]); }
+    match /waterTaxes/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]); allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager", "accountant"]); allow delete: if hasRole(resource.data.workspaceId, ["owner"]); }
+    match /propertyTaxes/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]); allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager", "accountant"]); allow delete: if hasRole(resource.data.workspaceId, ["owner"]); }
+    match /expenses/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]); allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager", "accountant"]); allow delete: if hasRole(resource.data.workspaceId, ["owner"]); }
+    match /documents/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]); allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager", "accountant"]); allow delete: if hasRole(resource.data.workspaceId, ["owner"]); }
+    match /notifications/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && hasRole(request.resource.data.workspaceId, ["owner", "manager"]); allow update: if immutableWorkspace() && isMember(resource.data.workspaceId); allow delete: if hasRole(resource.data.workspaceId, ["owner"]); }
+  }
+}
