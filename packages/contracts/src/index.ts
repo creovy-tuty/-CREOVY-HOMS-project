@@ -2,7 +2,7 @@
 export const COLLECTIONS = [
   'users', 'workspaces', 'workspaceMembers', 'properties', 'units', 'tenants',
   'rentalAgreements', 'rentDues', 'rentPayments', 'receipts', 'tenantLedger',
-  'securityDeposits', 'ebBills', 'waterTaxes', 'propertyTaxes', 'expenses',
+  'securityDeposits', 'securityDepositTransactions', 'securityDepositReceipts', 'securityDepositLedger', 'ebBills', 'waterTaxes', 'propertyTaxes', 'expenses',
   'documents', 'notifications',
 ] as const;
 
@@ -95,6 +95,87 @@ export interface RentLedgerEntry {
   amountPaise: number;
   transactionDate: TimestampValue;
   paymentMode: RentPayment['paymentMode'];
+  referenceNumber: string;
+  description: string;
+  createdBy: string;
+  createdAt: TimestampValue;
+}
+
+export type DepositTransactionType = 'received' | 'refunded';
+export type DepositPaymentMode = RentPayment['paymentMode'];
+
+/** Immutable movement. Document ID equals submissionId (a stable UUID). */
+export interface SecurityDepositTransaction {
+  workspaceId: string;
+  submissionId: string;
+  agreementId: string;
+  tenantId: string;
+  propertyId: string;
+  unitId: string;
+  transactionType: DepositTransactionType;
+  amountPaise: number;
+  transactionDate: TimestampValue;
+  paymentMode: DepositPaymentMode;
+  referenceNumber: string;
+  notes: string;
+  createdBy: string;
+  createdAt: TimestampValue;
+}
+
+/** securityDeposits/{agreementId}: atomic current balance, not a rent ledger. */
+export interface SecurityDepositSummary {
+  workspaceId: string;
+  agreementId: string;
+  tenantId: string;
+  propertyId: string;
+  unitId: string;
+  agreedAmountPaise: number;
+  totalReceivedPaise: number;
+  pendingToReceivePaise: number;
+  totalRefundedPaise: number;
+  heldBalancePaise: number;
+  lastTransactionId: string;
+  createdAt: TimestampValue;
+  updatedAt: TimestampValue;
+}
+
+/** securityDepositReceipts/{depositTransactionId}: immutable owner-facing snapshot. */
+export interface SecurityDepositReceipt {
+  workspaceId: string;
+  receiptNumber: string;
+  depositTransactionId: string;
+  agreementId: string;
+  tenantId: string;
+  propertyId: string;
+  unitId: string;
+  tenantName: string;
+  propertyName: string;
+  unitName: string;
+  transactionType: DepositTransactionType;
+  amountPaise: number;
+  transactionDate: TimestampValue;
+  paymentMode: DepositPaymentMode;
+  referenceNumber: string;
+  agreedAmountPaise: number;
+  totalReceivedPaise: number;
+  heldBalancePaise: number;
+  createdBy: string;
+  createdAt: TimestampValue;
+}
+
+/** securityDepositLedger/deposit_{depositTransactionId}: immutable journal. */
+export interface SecurityDepositLedgerEntry {
+  workspaceId: string;
+  tenantId: string;
+  agreementId: string;
+  propertyId: string;
+  unitId: string;
+  depositTransactionId: string;
+  depositReceiptId: string;
+  entryType: 'deposit_received' | 'deposit_refunded';
+  amountPaise: number;
+  transactionDate: TimestampValue;
+  paymentMode: DepositPaymentMode;
   referenceNumber: string;
   description: string;
   createdBy: string;

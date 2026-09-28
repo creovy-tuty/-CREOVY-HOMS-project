@@ -16,7 +16,7 @@ String receiptPeriod(String value) => RegExp(r'^\d{4}-\d{2}$').hasMatch(value) ?
 
 // package:pdf does not shape Tamil vowel signs and conjuncts. Flutter's text
 // engine does; rasterize only variable receipt values with the bundled font.
-Future<pw.Widget> _shapedReceiptValue(String value) async {
+Future<pw.Widget> shapedReceiptValue(String value) async {
   const width = 300.0;
   const scale = 3.0;
   final painter = TextPainter(
@@ -44,10 +44,10 @@ Future<pw.Widget> _shapedReceiptValue(String value) async {
 
 Future<Uint8List> createReceiptPdf(RentReceiptRecord receipt) async {
   final pdf = pw.Document();
-  final tenant = await _shapedReceiptValue(receipt.tenantName);
-  final property = await _shapedReceiptValue(receipt.propertyName);
-  final unit = await _shapedReceiptValue(receipt.unitName);
-  final reference = receipt.referenceNumber.isEmpty ? null : await _shapedReceiptValue(receipt.referenceNumber);
+  final tenant = await shapedReceiptValue(receipt.tenantName);
+  final property = await shapedReceiptValue(receipt.propertyName);
+  final unit = await shapedReceiptValue(receipt.unitName);
+  final reference = receipt.referenceNumber.isEmpty ? null : await shapedReceiptValue(receipt.referenceNumber);
   pw.Widget plain(String value) => pw.Text(value, textAlign: pw.TextAlign.right, style: pw.TextStyle(fontWeight: pw.FontWeight.bold));
   pw.Widget line(String title, pw.Widget value) => pw.Padding(padding: const pw.EdgeInsets.only(bottom: 14), child: pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, crossAxisAlignment: pw.CrossAxisAlignment.start, children: [pw.Text(title, style: const pw.TextStyle(color: PdfColors.grey700)), pw.SizedBox(width: 22), pw.Expanded(child: pw.Align(alignment: pw.Alignment.centerRight, child: value))]));
   pdf.addPage(pw.Page(pageFormat: PdfPageFormat.a4, margin: const pw.EdgeInsets.all(48), build: (_) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [

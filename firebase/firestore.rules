@@ -175,6 +175,185 @@ service cloud.firestore {
         getAfter(/databases/$(database)/documents/receipts/$(ledger.receiptId)).data.paymentId == ledger.paymentId;
     }
 
+    function depositAgreementPath(agreementId) {
+      return /databases/$(database)/documents/rentalAgreements/$(agreementId);
+    }
+
+    function depositSummaryPath(agreementId) {
+      return /databases/$(database)/documents/securityDeposits/$(agreementId);
+    }
+
+    function depositTransactionPath(submissionId) {
+      return /databases/$(database)/documents/securityDepositTransactions/$(submissionId);
+    }
+
+    function depositReceiptPath(submissionId) {
+      return /databases/$(database)/documents/securityDepositReceipts/$(submissionId);
+    }
+
+    function depositLedgerPath(submissionId) {
+      return /databases/$(database)/documents/securityDepositLedger/$("deposit_" + submissionId);
+    }
+
+    function validDepositRelationship(data, agreementId) {
+      let agreement = getAfter(depositAgreementPath(agreementId)).data;
+      return existsAfter(depositAgreementPath(agreementId)) &&
+        data.agreementId == agreementId && data.workspaceId == agreement.workspaceId &&
+        data.tenantId == agreement.tenantId && data.propertyId == agreement.propertyId &&
+        data.unitId == agreement.unitId &&
+        agreement.securityDepositAgreedPaise is int &&
+        agreement.securityDepositAgreedPaise >= 0 &&
+        agreement.securityDepositAgreedPaise <= 9007199254740991;
+    }
+
+    function validDepositSummaryShape(data, agreementId) {
+      return data.keys().hasAll(["workspaceId", "agreementId", "tenantId", "propertyId", "unitId", "agreedAmountPaise", "totalReceivedPaise", "pendingToReceivePaise", "totalRefundedPaise", "heldBalancePaise", "lastTransactionId", "createdAt", "updatedAt"]) &&
+        data.keys().hasOnly(["workspaceId", "agreementId", "tenantId", "propertyId", "unitId", "agreedAmountPaise", "totalReceivedPaise", "pendingToReceivePaise", "totalRefundedPaise", "heldBalancePaise", "lastTransactionId", "createdAt", "updatedAt"]) &&
+        validDepositRelationship(data, agreementId) &&
+        data.agreedAmountPaise == getAfter(depositAgreementPath(agreementId)).data.securityDepositAgreedPaise &&
+        data.totalReceivedPaise is int && data.totalRefundedPaise is int &&
+        data.pendingToReceivePaise is int && data.heldBalancePaise is int &&
+        data.totalReceivedPaise >= 0 && data.totalReceivedPaise <= data.agreedAmountPaise &&
+        data.totalRefundedPaise >= 0 && data.totalRefundedPaise <= data.totalReceivedPaise &&
+        data.pendingToReceivePaise == data.agreedAmountPaise - data.totalReceivedPaise &&
+        data.heldBalancePaise == data.totalReceivedPaise - data.totalRefundedPaise &&
+        data.lastTransactionId is string;
+    }
+
+    function validDepositTransactionShape(data, submissionId) {
+      return data.keys().hasAll(["workspaceId", "submissionId", "agreementId", "tenantId", "propertyId", "unitId", "transactionType", "amountPaise", "transactionDate", "paymentMode", "referenceNumber", "notes", "createdBy", "createdAt"]) &&
+        data.keys().hasOnly(["workspaceId", "submissionId", "agreementId", "tenantId", "propertyId", "unitId", "transactionType", "amountPaise", "transactionDate", "paymentMode", "referenceNumber", "notes", "createdBy", "createdAt"]) &&
+        submissionId.matches('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$') &&
+        data.submissionId == submissionId && data.agreementId is string &&
+        validDepositRelationship(data, data.agreementId) &&
+        data.transactionType in ["received", "refunded"] &&
+        data.amountPaise is int && data.amountPaise > 0 && data.amountPaise <= 9007199254740991 &&
+        data.transactionDate is timestamp &&
+        data.paymentMode in ["cash", "upi", "bank_transfer", "cheque", "other"] &&
+        data.referenceNumber is string && data.referenceNumber.size() <= 200 &&
+        data.notes is string && data.notes.size() <= 2000 &&
+        data.createdBy == request.auth.uid && data.createdAt == request.time;
+    }
+
+    function depositDeltaMatches(before, after, movement) {
+      return after.totalReceivedPaise == before.totalReceivedPaise +
+          (movement.transactionType == "received" ? movement.amountPaise : 0) &&
+        after.totalRefundedPaise == before.totalRefundedPaise +
+          (movement.transactionType == "refunded" ? movement.amountPaise : 0) &&
+        after.heldBalancePaise >= 0 && after.pendingToReceivePaise >= 0;
+    }
+
+    function validDepositSummaryCreate(agreementId) {
+      let after = request.resource.data;
+      let movement = getAfter(depositTransactionPath(after.lastTransactionId)).data;
+      return validDepositSummaryShape(after, agreementId) &&
+        !exists(depositTransactionPath(after.lastTransactionId)) &&
+        existsAfter(depositTransactionPath(after.lastTransactionId)) &&
+        validDepositTransactionShape(movement, after.lastTransactionId) &&
+        movement.agreementId == agreementId && movement.transactionType == "received" &&
+        after.totalReceivedPaise == movement.amountPaise && after.totalRefundedPaise == 0 &&
+        after.createdAt == request.time && after.updatedAt == request.time;
+    }
+
+    function validDepositSummaryUpdate(agreementId) {
+      let before = resource.data;
+      let after = request.resource.data;
+      let movement = getAfter(depositTransactionPath(after.lastTransactionId)).data;
+      return validDepositSummaryShape(before, agreementId) &&
+        validDepositSummaryShape(after, agreementId) &&
+        after.diff(before).affectedKeys().hasOnly(["totalReceivedPaise", "pendingToReceivePaise", "totalRefundedPaise", "heldBalancePaise", "lastTransactionId", "updatedAt"]) &&
+        after.lastTransactionId != before.lastTransactionId &&
+        !exists(depositTransactionPath(after.lastTransactionId)) &&
+        existsAfter(depositTransactionPath(after.lastTransactionId)) &&
+        validDepositTransactionShape(movement, after.lastTransactionId) &&
+        movement.agreementId == agreementId &&
+        depositDeltaMatches(before, after, movement) &&
+        after.updatedAt == request.time;
+    }
+
+    function validDepositMovementBundle(submissionId) {
+      let movement = request.resource.data;
+      let after = getAfter(depositSummaryPath(movement.agreementId)).data;
+      return existsAfter(depositSummaryPath(movement.agreementId)) &&
+        validDepositSummaryShape(after, movement.agreementId) &&
+        after.lastTransactionId == submissionId &&
+        after.workspaceId == movement.workspaceId &&
+        (!exists(depositSummaryPath(movement.agreementId)) ||
+          get(depositSummaryPath(movement.agreementId)).data.lastTransactionId != submissionId);
+    }
+
+    function validDepositArtifactsBundle(submissionId) {
+      return !exists(depositReceiptPath(submissionId)) &&
+        !exists(depositLedgerPath(submissionId)) &&
+        existsAfter(depositReceiptPath(submissionId)) &&
+        existsAfter(depositLedgerPath(submissionId));
+    }
+
+    function matchesDepositMovement(record, movement) {
+      return record.workspaceId == movement.workspaceId &&
+        record.depositTransactionId == movement.submissionId &&
+        record.agreementId == movement.agreementId &&
+        record.tenantId == movement.tenantId &&
+        record.propertyId == movement.propertyId &&
+        record.unitId == movement.unitId &&
+        record.amountPaise == movement.amountPaise &&
+        record.transactionDate == movement.transactionDate &&
+        record.paymentMode == movement.paymentMode &&
+        record.referenceNumber == movement.referenceNumber &&
+        record.createdBy == movement.createdBy;
+    }
+
+    function validDepositReceipt(documentId) {
+      let receipt = request.resource.data;
+      let movement = getAfter(depositTransactionPath(documentId)).data;
+      let balance = getAfter(depositSummaryPath(receipt.agreementId)).data;
+      return receipt.keys().hasAll(["workspaceId", "receiptNumber", "depositTransactionId", "agreementId", "tenantId", "propertyId", "unitId", "tenantName", "propertyName", "unitName", "transactionType", "amountPaise", "transactionDate", "paymentMode", "referenceNumber", "agreedAmountPaise", "totalReceivedPaise", "heldBalancePaise", "createdBy", "createdAt"]) &&
+        receipt.keys().hasOnly(["workspaceId", "receiptNumber", "depositTransactionId", "agreementId", "tenantId", "propertyId", "unitId", "tenantName", "propertyName", "unitName", "transactionType", "amountPaise", "transactionDate", "paymentMode", "referenceNumber", "agreedAmountPaise", "totalReceivedPaise", "heldBalancePaise", "createdBy", "createdAt"]) &&
+        !exists(depositTransactionPath(documentId)) && existsAfter(depositTransactionPath(documentId)) &&
+        validDepositTransactionShape(movement, documentId) && matchesDepositMovement(receipt, movement) &&
+        receipt.transactionType == movement.transactionType &&
+        receipt.receiptNumber == (movement.transactionType == "received" ? "CRV-D-R-" : "CRV-D-F-") + documentId &&
+        receipt.receiptNumber.size() <= 50 &&
+        receipt.createdBy == request.auth.uid && receipt.createdAt == request.time &&
+        receipt.tenantName is string && receipt.tenantName.size() > 0 && receipt.tenantName.size() <= 200 &&
+        receipt.propertyName is string && receipt.propertyName.size() > 0 && receipt.propertyName.size() <= 200 &&
+        receipt.unitName is string && receipt.unitName.size() > 0 && receipt.unitName.size() <= 200 &&
+        get(/databases/$(database)/documents/tenants/$(receipt.tenantId)).data.workspaceId == receipt.workspaceId &&
+        get(/databases/$(database)/documents/tenants/$(receipt.tenantId)).data.fullName == receipt.tenantName &&
+        get(/databases/$(database)/documents/properties/$(receipt.propertyId)).data.workspaceId == receipt.workspaceId &&
+        get(/databases/$(database)/documents/properties/$(receipt.propertyId)).data.name == receipt.propertyName &&
+        get(/databases/$(database)/documents/units/$(receipt.unitId)).data.workspaceId == receipt.workspaceId &&
+        get(/databases/$(database)/documents/units/$(receipt.unitId)).data.propertyId == receipt.propertyId &&
+        get(/databases/$(database)/documents/units/$(receipt.unitId)).data.name == receipt.unitName &&
+        balance.lastTransactionId == documentId &&
+        receipt.agreedAmountPaise == balance.agreedAmountPaise &&
+        receipt.totalReceivedPaise == balance.totalReceivedPaise &&
+        receipt.heldBalancePaise == balance.heldBalancePaise &&
+        !exists(depositLedgerPath(documentId)) && existsAfter(depositLedgerPath(documentId));
+    }
+
+    function validDepositLedger(documentId) {
+      let entry = request.resource.data;
+      let movement = getAfter(depositTransactionPath(entry.depositTransactionId)).data;
+      let receipt = getAfter(depositReceiptPath(entry.depositTransactionId)).data;
+      return entry.keys().hasAll(["workspaceId", "tenantId", "agreementId", "propertyId", "unitId", "depositTransactionId", "depositReceiptId", "entryType", "amountPaise", "transactionDate", "paymentMode", "referenceNumber", "description", "createdBy", "createdAt"]) &&
+        entry.keys().hasOnly(["workspaceId", "tenantId", "agreementId", "propertyId", "unitId", "depositTransactionId", "depositReceiptId", "entryType", "amountPaise", "transactionDate", "paymentMode", "referenceNumber", "description", "createdBy", "createdAt"]) &&
+        entry.depositTransactionId is string && documentId == "deposit_" + entry.depositTransactionId &&
+        entry.depositReceiptId == entry.depositTransactionId &&
+        !exists(depositTransactionPath(entry.depositTransactionId)) &&
+        existsAfter(depositTransactionPath(entry.depositTransactionId)) &&
+        !exists(depositReceiptPath(entry.depositTransactionId)) &&
+        existsAfter(depositReceiptPath(entry.depositTransactionId)) &&
+        validDepositTransactionShape(movement, entry.depositTransactionId) &&
+        matchesDepositMovement(entry, movement) &&
+        entry.entryType == (movement.transactionType == "received" ? "deposit_received" : "deposit_refunded") &&
+        entry.description == (movement.transactionType == "received" ? "Security deposit received" : "Security deposit refunded") &&
+        entry.createdBy == request.auth.uid && entry.createdAt == request.time &&
+        receipt.depositTransactionId == entry.depositTransactionId &&
+        receipt.receiptNumber == (movement.transactionType == "received" ? "CRV-D-R-" : "CRV-D-F-") + entry.depositTransactionId &&
+        matchesDepositMovement(receipt, movement);
+    }
+
     // Profiles are private. Membership and roles, rather than profile fields,
     // authorize every workspace resource.
     match /users/{userId} {
@@ -238,7 +417,7 @@ service cloud.firestore {
     }
     match /units/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && validUnitProperty() && request.resource.data.status == "vacant" && hasRole(request.resource.data.workspaceId, ["owner", "manager"]); allow update: if immutableWorkspace() && request.resource.data.propertyId == resource.data.propertyId && validUnitProperty() && ((request.resource.data.status != "occupied" && resource.data.status != "occupied") || (request.resource.data.status == "occupied" && agreementControlsOccupancy(documentId)) || (resource.data.status == "occupied" && request.resource.data.status == "vacant" && resource.data.activeAgreementId is string && getAfter(/databases/$(database)/documents/rentalAgreements/$(resource.data.activeAgreementId)).data.status in ["ended", "cancelled"])) && hasRole(resource.data.workspaceId, ["owner", "manager"]); allow delete: if hasRole(resource.data.workspaceId, ["owner"]); }
     match /tenants/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && request.resource.data.status in ["active", "inactive"] && hasRole(request.resource.data.workspaceId, ["owner", "manager"]); allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager"]); allow delete: if false; }
-    match /rentalAgreements/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && request.resource.data.status in ["draft", "upcoming"] && hasRole(request.resource.data.workspaceId, ["owner", "manager"]); allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager"]); allow delete: if false; }
+    match /rentalAgreements/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && request.resource.data.status in ["draft", "upcoming"] && hasRole(request.resource.data.workspaceId, ["owner", "manager"]); allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager"]) && (!existsAfter(depositSummaryPath(documentId)) || (request.resource.data.securityDepositAgreedPaise == resource.data.securityDepositAgreedPaise && request.resource.data.tenantId == resource.data.tenantId && request.resource.data.propertyId == resource.data.propertyId && request.resource.data.unitId == resource.data.unitId)); allow delete: if false; }
     match /rentDues/{documentId} {
       allow read: if isMember(resource.data.workspaceId);
       allow create: if validWorkspaceDocument() && validRentDueRelationship() &&
@@ -300,7 +479,44 @@ service cloud.firestore {
         validRentLedger(documentId);
       allow update, delete: if false;
     }
-    match /securityDeposits/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]); allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager", "accountant"]); allow delete: if hasRole(resource.data.workspaceId, ["owner"]); }
+    // A balance may change only alongside one new immutable movement. The
+    // agreement ID is also the balance document ID, serializing all writers.
+    match /securityDeposits/{documentId} {
+      allow get: if signedIn() && (resource == null || isMember(resource.data.workspaceId));
+      allow list: if isMember(resource.data.workspaceId);
+      allow create: if validWorkspaceDocument() &&
+        hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]) &&
+        validDepositSummaryCreate(documentId);
+      allow update: if immutableWorkspace() &&
+        hasRole(resource.data.workspaceId, ["owner", "manager", "accountant"]) &&
+        validDepositSummaryUpdate(documentId);
+      allow delete: if false;
+    }
+    match /securityDepositTransactions/{documentId} {
+      allow get: if signedIn() && (resource == null || isMember(resource.data.workspaceId));
+      allow list: if isMember(resource.data.workspaceId);
+      allow create: if validWorkspaceDocument() &&
+        hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]) &&
+        validDepositTransactionShape(request.resource.data, documentId) &&
+        validDepositMovementBundle(documentId) && validDepositArtifactsBundle(documentId);
+      allow update, delete: if false;
+    }
+    match /securityDepositReceipts/{documentId} {
+      allow get: if signedIn() && (resource == null || isMember(resource.data.workspaceId));
+      allow list: if isMember(resource.data.workspaceId);
+      allow create: if validWorkspaceDocument() &&
+        hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]) &&
+        validDepositReceipt(documentId);
+      allow update, delete: if false;
+    }
+    match /securityDepositLedger/{documentId} {
+      allow get: if signedIn() && (resource == null || isMember(resource.data.workspaceId));
+      allow list: if isMember(resource.data.workspaceId);
+      allow create: if validWorkspaceDocument() &&
+        hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]) &&
+        validDepositLedger(documentId);
+      allow update, delete: if false;
+    }
     match /ebBills/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]); allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager", "accountant"]); allow delete: if hasRole(resource.data.workspaceId, ["owner"]); }
     match /waterTaxes/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]); allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager", "accountant"]); allow delete: if hasRole(resource.data.workspaceId, ["owner"]); }
     match /propertyTaxes/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]); allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager", "accountant"]); allow delete: if hasRole(resource.data.workspaceId, ["owner"]); }

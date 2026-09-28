@@ -4,6 +4,7 @@ import { formatINR } from '../design/tokens';
 import type { WorkspaceAccess } from '../lib/workspace';
 import { PropertiesPage } from '../features/properties/properties-page';
 import { TenantsPage } from '../features/tenants/tenants-page';
+import { AdvancesPage } from '../features/tenants/security-deposit-ui';
 import { TenantDetailRoute } from '../features/tenants/tenants-page';
 import { RentPage } from '../features/rent/rent-page';
 import { ReceiptPage } from '../features/rent/receipt-page';
@@ -40,9 +41,10 @@ export function AppShell({ workspace, owner, onLogout }: { workspace: WorkspaceA
   const navigate = (name: string) => { setPage(name); setDrawer(false); if (name === 'Tenant Ledger') setLedgerTenantId(null); };
   const viewReceipt = (paymentId: string) => { setPreviousPage(page); setReceiptPaymentId(paymentId); setPage('Receipt Detail'); };
   const viewLedger = (id: string) => { setLedgerTenantId(id); setPage('Tenant Ledger'); };
-  const content = page === 'Properties' ? <PropertiesPage workspaceId={workspace.id} ownerName={owner} />
-    : page === 'Tenants' ? <TenantsPage workspaceId={workspace.id} />
-    : page === 'Tenant Detail' && tenantId ? <TenantDetailRoute workspaceId={workspace.id} tenantId={tenantId} back={() => navigate('Properties')} />
+  const content = page === 'Properties' ? <PropertiesPage workspaceId={workspace.id} ownerName={owner} role={workspace.role} />
+    : page === 'Tenants' ? <TenantsPage workspaceId={workspace.id} role={workspace.role} />
+    : page === 'Tenant Detail' && tenantId ? <TenantDetailRoute workspaceId={workspace.id} role={workspace.role} tenantId={tenantId} back={() => navigate('Properties')} />
+    : page === 'Advances' ? <AdvancesPage workspaceId={workspace.id} role={workspace.role} />
     : page === 'Rent Collection' ? <RentPage workspaceId={workspace.id} viewReceipt={viewReceipt} />
     : page === 'Receipts' ? <ReceiptsPage workspaceId={workspace.id} viewReceipt={viewReceipt} />
     : page === 'Tenant Ledger' ? <TenantLedgerPage workspaceId={workspace.id} initialTenantId={ledgerTenantId} viewReceipt={viewReceipt} />
