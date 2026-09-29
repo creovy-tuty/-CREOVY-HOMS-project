@@ -472,6 +472,44 @@ service cloud.firestore {
         after.diff(before).affectedKeys().hasOnly(["totalPaidPaise", "balancePaise", "status", "lastPaymentId", "updatedAt"]);
     }
 
+    function activeExpenseWorkspace(workspaceId) {
+      return exists(/databases/$(database)/documents/workspaces/$(workspaceId)) &&
+        get(/databases/$(database)/documents/workspaces/$(workspaceId)).data.status == "active";
+    }
+
+    function validExpenseShape(data, documentId) {
+      return data.keys().hasAll(["workspaceId", "submissionId", "propertyId", "unitId", "category",
+        "title", "vendorName", "amountPaise", "expenseDate", "paymentMode", "referenceNumber",
+        "notes", "createdBy", "createdAt", "updatedAt"]) &&
+        data.keys().hasOnly(["workspaceId", "submissionId", "propertyId", "unitId", "category",
+        "title", "vendorName", "amountPaise", "expenseDate", "paymentMode", "referenceNumber",
+        "notes", "createdBy", "createdAt", "updatedAt"]) &&
+        data.workspaceId is string && data.workspaceId.size() > 0 &&
+        data.submissionId is string && data.submissionId == documentId &&
+        data.submissionId.matches('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$') &&
+        data.propertyId is string && data.propertyId.size() > 0 &&
+        (data.unitId == null || (data.unitId is string && data.unitId.size() > 0)) &&
+        data.category in ["maintenance", "repair", "plumbing", "electrical", "cleaning", "painting", "security", "labour", "common_area", "other"] &&
+        data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+        data.vendorName is string && data.vendorName.size() <= 200 &&
+        data.amountPaise is int && data.amountPaise > 0 && data.amountPaise <= 9007199254740991 &&
+        data.expenseDate is timestamp &&
+        data.paymentMode in ["cash", "upi", "bank_transfer", "cheque", "other"] &&
+        data.referenceNumber is string && data.referenceNumber.size() <= 200 &&
+        data.notes is string && data.notes.size() <= 2000 &&
+        data.createdBy is string && data.createdBy.size() > 0 &&
+        data.createdAt is timestamp && data.updatedAt is timestamp;
+    }
+
+    function validExpenseRelationships(data) {
+      return existsAfter(/databases/$(database)/documents/properties/$(data.propertyId)) &&
+        getAfter(/databases/$(database)/documents/properties/$(data.propertyId)).data.workspaceId == data.workspaceId &&
+        (data.unitId == null ||
+          (existsAfter(/databases/$(database)/documents/units/$(data.unitId)) &&
+           getAfter(/databases/$(database)/documents/units/$(data.unitId)).data.workspaceId == data.workspaceId &&
+           getAfter(/databases/$(database)/documents/units/$(data.unitId)).data.propertyId == data.propertyId));
+    }
+
     // Profiles are private. Membership and roles, rather than profile fields,
     // authorize every workspace resource.
     match /users/{userId} {
@@ -661,10 +699,32 @@ service cloud.firestore {
         validBillPaymentBundle(documentId);
       allow update, delete: if false;
     }
+    match /propertyExpenses/{documentId} {
+      // An absent submission UUID may be read inside the creation transaction.
+      allow get: if signedIn() && (resource == null || isMember(resource.data.workspaceId));
+      allow list: if isMember(resource.data.workspaceId);
+      allow create: if validExpenseShape(request.resource.data, documentId) &&
+        hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]) &&
+        activeExpenseWorkspace(request.resource.data.workspaceId) &&
+        validExpenseRelationships(request.resource.data) &&
+        request.resource.data.createdBy == request.auth.uid &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.updatedAt == request.time;
+      allow update: if hasRole(resource.data.workspaceId, ["owner", "manager", "accountant"]) &&
+        activeExpenseWorkspace(resource.data.workspaceId) &&
+        validExpenseShape(resource.data, documentId) &&
+        validExpenseShape(request.resource.data, documentId) &&
+        validExpenseRelationships(request.resource.data) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(["title", "vendorName", "notes", "updatedAt"]) &&
+        request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
     match /ebBills/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]); allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager", "accountant"]); allow delete: if hasRole(resource.data.workspaceId, ["owner"]); }
     match /waterTaxes/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]); allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager", "accountant"]); allow delete: if hasRole(resource.data.workspaceId, ["owner"]); }
     match /propertyTaxes/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]); allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager", "accountant"]); allow delete: if hasRole(resource.data.workspaceId, ["owner"]); }
-    match /expenses/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]); allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager", "accountant"]); allow delete: if hasRole(resource.data.workspaceId, ["owner"]); }
+    // Legacy placeholder: no current client writes here. Keep existing records readable, but
+    // prevent bypassing the stricter propertyExpenses financial-history policy.
+    match /expenses/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create, update, delete: if false; }
     match /documents/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]); allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager", "accountant"]); allow delete: if hasRole(resource.data.workspaceId, ["owner"]); }
     match /notifications/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && hasRole(request.resource.data.workspaceId, ["owner", "manager"]); allow update: if immutableWorkspace() && isMember(resource.data.workspaceId); allow delete: if hasRole(resource.data.workspaceId, ["owner"]); }
   }

@@ -2,7 +2,7 @@
 export const COLLECTIONS = [
   'users', 'workspaces', 'workspaceMembers', 'properties', 'units', 'tenants',
   'rentalAgreements', 'rentDues', 'rentPayments', 'receipts', 'tenantLedger',
-  'securityDeposits', 'securityDepositTransactions', 'securityDepositReceipts', 'securityDepositLedger', 'propertyBills', 'propertyBillPayments', 'ebBills', 'waterTaxes', 'propertyTaxes', 'expenses',
+  'securityDeposits', 'securityDepositTransactions', 'securityDepositReceipts', 'securityDepositLedger', 'propertyBills', 'propertyBillPayments', 'propertyExpenses', 'ebBills', 'waterTaxes', 'propertyTaxes', 'expenses',
   'documents', 'notifications',
 ] as const;
 
@@ -106,6 +106,24 @@ export type DepositPaymentMode = RentPayment['paymentMode'];
 export type PropertyBillType = 'electricity' | 'water_tax' | 'property_tax' | 'other';
 export type PropertyBillStatus = 'pending' | 'partial' | 'paid' | 'overdue';
 export type PropertyBillPaymentMode = RentPayment['paymentMode'];
+export type PropertyExpenseCategory = 'maintenance' | 'repair' | 'plumbing' | 'electrical' | 'cleaning' | 'painting' | 'security' | 'labour' | 'common_area' | 'other';
+export type PropertyExpensePaymentMode = RentPayment['paymentMode'];
+
+/** propertyExpenses/{submissionId}: one immutable owner cash outflow, with safe descriptive edits. */
+export interface PropertyExpense extends WorkspaceOwned {
+  submissionId: string;
+  propertyId: string;
+  unitId: string | null;
+  category: PropertyExpenseCategory;
+  title: string;
+  vendorName: string;
+  amountPaise: number;
+  expenseDate: TimestampValue;
+  paymentMode: PropertyExpensePaymentMode;
+  referenceNumber: string;
+  notes: string;
+  createdBy: string;
+}
 
 /** propertyBills/{autoId}; unitId is null for a property-level bill. */
 export interface PropertyBill extends WorkspaceOwned {
