@@ -2,7 +2,7 @@
 export const COLLECTIONS = [
   'users', 'workspaces', 'workspaceMembers', 'properties', 'units', 'tenants',
   'rentalAgreements', 'rentDues', 'rentPayments', 'receipts', 'tenantLedger',
-  'securityDeposits', 'securityDepositTransactions', 'securityDepositReceipts', 'securityDepositLedger', 'ebBills', 'waterTaxes', 'propertyTaxes', 'expenses',
+  'securityDeposits', 'securityDepositTransactions', 'securityDepositReceipts', 'securityDepositLedger', 'propertyBills', 'propertyBillPayments', 'ebBills', 'waterTaxes', 'propertyTaxes', 'expenses',
   'documents', 'notifications',
 ] as const;
 
@@ -103,6 +103,45 @@ export interface RentLedgerEntry {
 
 export type DepositTransactionType = 'received' | 'refunded';
 export type DepositPaymentMode = RentPayment['paymentMode'];
+export type PropertyBillType = 'electricity' | 'water_tax' | 'property_tax' | 'other';
+export type PropertyBillStatus = 'pending' | 'partial' | 'paid' | 'overdue';
+export type PropertyBillPaymentMode = RentPayment['paymentMode'];
+
+/** propertyBills/{autoId}; unitId is null for a property-level bill. */
+export interface PropertyBill extends WorkspaceOwned {
+  propertyId: string;
+  unitId: string | null;
+  billType: PropertyBillType;
+  providerName: string;
+  consumerNumber: string;
+  periodKey: string;
+  billDate: TimestampValue;
+  dueDate: TimestampValue;
+  amountPaise: number;
+  totalPaidPaise: number;
+  balancePaise: number;
+  status: PropertyBillStatus;
+  notes: string;
+  lastPaymentId: string | null;
+  createdBy: string;
+}
+
+/** propertyBillPayments/{submissionId}; immutable individual payment. */
+export interface PropertyBillPayment {
+  workspaceId: string;
+  submissionId: string;
+  billId: string;
+  propertyId: string;
+  unitId: string | null;
+  billType: PropertyBillType;
+  amountPaise: number;
+  paymentDate: TimestampValue;
+  paymentMode: PropertyBillPaymentMode;
+  referenceNumber: string;
+  notes: string;
+  createdBy: string;
+  createdAt: TimestampValue;
+}
 
 /** Immutable movement. Document ID equals submissionId (a stable UUID). */
 export interface SecurityDepositTransaction {

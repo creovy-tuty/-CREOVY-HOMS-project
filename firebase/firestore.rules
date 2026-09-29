@@ -354,6 +354,124 @@ service cloud.firestore {
         matchesDepositMovement(receipt, movement);
     }
 
+    // Step 8A: propertyBills/{autoId} is workspace/property scoped, optionally
+    // unit scoped; propertyBillPayments/{UUID} is one immutable payment. All
+    // dates are timestamps and amounts are integer INR paise. Clients encode
+    // dueDate as midnight Asia/Kolkata; rules use the next midnight boundary.
+    function billPath(billId) {
+      return /databases/$(database)/documents/propertyBills/$(billId);
+    }
+
+    function billPaymentPath(paymentId) {
+      return /databases/$(database)/documents/propertyBillPayments/$(paymentId);
+    }
+
+    function validBillShape(data) {
+      return data.keys().hasAll(["workspaceId", "propertyId", "unitId", "billType", "providerName", "consumerNumber", "periodKey", "billDate", "dueDate", "amountPaise", "totalPaidPaise", "balancePaise", "status", "notes", "lastPaymentId", "createdBy", "createdAt", "updatedAt"]) &&
+        data.keys().hasOnly(["workspaceId", "propertyId", "unitId", "billType", "providerName", "consumerNumber", "periodKey", "billDate", "dueDate", "amountPaise", "totalPaidPaise", "balancePaise", "status", "notes", "lastPaymentId", "createdBy", "createdAt", "updatedAt"]) &&
+        data.workspaceId is string && data.workspaceId.size() > 0 && data.workspaceId.size() <= 200 &&
+        data.propertyId is string && data.propertyId.size() > 0 && data.propertyId.size() <= 200 &&
+        (data.unitId == null || (data.unitId is string && data.unitId.size() > 0 && data.unitId.size() <= 200)) &&
+        data.billType in ["electricity", "water_tax", "property_tax", "other"] &&
+        data.providerName is string && data.providerName.size() > 0 && data.providerName.size() <= 200 &&
+        data.consumerNumber is string && data.consumerNumber.size() <= 200 &&
+        data.periodKey is string && data.periodKey.size() <= 40 &&
+        data.billDate is timestamp && data.dueDate is timestamp &&
+        data.billDate < data.dueDate + duration.value(1, "d") &&
+        data.amountPaise is int && data.amountPaise > 0 && data.amountPaise <= 9007199254740991 &&
+        data.totalPaidPaise is int && data.totalPaidPaise >= 0 &&
+        data.balancePaise is int && data.balancePaise >= 0 &&
+        data.totalPaidPaise + data.balancePaise == data.amountPaise &&
+        data.status in ["pending", "partial", "paid", "overdue"] &&
+        data.notes is string && data.notes.size() <= 2000 &&
+        (data.lastPaymentId == null || (data.lastPaymentId is string && data.lastPaymentId.matches('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$'))) &&
+        data.createdBy is string && data.createdBy.size() > 0 && data.createdBy.size() <= 128 &&
+        data.createdAt is timestamp && data.updatedAt is timestamp;
+    }
+
+    function validBillRelationships(data) {
+      return existsAfter(/databases/$(database)/documents/properties/$(data.propertyId)) &&
+        getAfter(/databases/$(database)/documents/properties/$(data.propertyId)).data.workspaceId == data.workspaceId &&
+        (data.unitId == null || (
+          existsAfter(/databases/$(database)/documents/units/$(data.unitId)) &&
+          getAfter(/databases/$(database)/documents/units/$(data.unitId)).data.workspaceId == data.workspaceId &&
+          getAfter(/databases/$(database)/documents/units/$(data.unitId)).data.propertyId == data.propertyId
+        ));
+    }
+
+    function expectedBillStatus(data) {
+      return data.balancePaise == 0 ? "paid" :
+        data.totalPaidPaise > 0 ? "partial" :
+        request.time >= data.dueDate + duration.value(1, "d") ? "overdue" : "pending";
+    }
+
+    function validBillMetadataUpdate() {
+      let before = resource.data;
+      let after = request.resource.data;
+      return after.diff(before).affectedKeys().hasOnly(["providerName", "consumerNumber", "periodKey", "billDate", "dueDate", "notes", "amountPaise", "balancePaise", "status", "updatedAt"]) &&
+        after.workspaceId == before.workspaceId && after.propertyId == before.propertyId &&
+        after.unitId == before.unitId && after.billType == before.billType &&
+        after.createdBy == before.createdBy && after.createdAt == before.createdAt &&
+        after.totalPaidPaise == before.totalPaidPaise && after.lastPaymentId == before.lastPaymentId &&
+        (before.totalPaidPaise == 0 && before.lastPaymentId == null ||
+          after.diff(before).affectedKeys().hasOnly(["notes", "status", "updatedAt"])) &&
+        after.balancePaise == after.amountPaise - after.totalPaidPaise &&
+        after.status == expectedBillStatus(after) && after.updatedAt == request.time;
+    }
+
+    function validBillPaymentUpdate(billId) {
+      let before = resource.data;
+      let after = request.resource.data;
+      let paymentId = after.lastPaymentId;
+      return after.diff(before).affectedKeys().hasOnly(["totalPaidPaise", "balancePaise", "status", "lastPaymentId", "updatedAt"]) &&
+        paymentId is string && paymentId != before.lastPaymentId &&
+        !exists(billPaymentPath(paymentId)) && existsAfter(billPaymentPath(paymentId)) &&
+        after.totalPaidPaise > before.totalPaidPaise &&
+        after.totalPaidPaise <= before.amountPaise &&
+        after.balancePaise == before.balancePaise - (after.totalPaidPaise - before.totalPaidPaise) &&
+        after.status == (after.balancePaise == 0 ? "paid" : "partial") &&
+        after.updatedAt == request.time &&
+        getAfter(billPaymentPath(paymentId)).data.billId == billId &&
+        getAfter(billPaymentPath(paymentId)).data.workspaceId == before.workspaceId &&
+        getAfter(billPaymentPath(paymentId)).data.amountPaise == after.totalPaidPaise - before.totalPaidPaise;
+    }
+
+    function validBillPaymentShape(data, documentId) {
+      return data.keys().hasAll(["workspaceId", "submissionId", "billId", "propertyId", "unitId", "billType", "amountPaise", "paymentDate", "paymentMode", "referenceNumber", "notes", "createdBy", "createdAt"]) &&
+        data.keys().hasOnly(["workspaceId", "submissionId", "billId", "propertyId", "unitId", "billType", "amountPaise", "paymentDate", "paymentMode", "referenceNumber", "notes", "createdBy", "createdAt"]) &&
+        documentId.matches('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$') &&
+        data.submissionId == documentId &&
+        data.workspaceId is string && data.workspaceId.size() > 0 && data.workspaceId.size() <= 200 &&
+        data.billId is string && data.billId.size() > 0 && data.billId.size() <= 200 &&
+        data.propertyId is string && data.propertyId.size() > 0 && data.propertyId.size() <= 200 &&
+        (data.unitId == null || (data.unitId is string && data.unitId.size() > 0 && data.unitId.size() <= 200)) &&
+        data.billType in ["electricity", "water_tax", "property_tax", "other"] &&
+        data.amountPaise is int && data.amountPaise > 0 && data.amountPaise <= 9007199254740991 &&
+        data.paymentDate is timestamp &&
+        data.paymentMode in ["cash", "upi", "bank_transfer", "cheque", "other"] &&
+        data.referenceNumber is string && data.referenceNumber.size() <= 200 &&
+        data.notes is string && data.notes.size() <= 2000 &&
+        data.createdBy == request.auth.uid && data.createdAt == request.time;
+    }
+
+    function validBillPaymentBundle(documentId) {
+      let payment = request.resource.data;
+      let before = get(billPath(payment.billId)).data;
+      let after = getAfter(billPath(payment.billId)).data;
+      return exists(billPath(payment.billId)) &&
+        validBillShape(before) && validBillShape(after) &&
+        before.workspaceId == payment.workspaceId && before.propertyId == payment.propertyId &&
+        before.unitId == payment.unitId && before.billType == payment.billType &&
+        before.balancePaise >= payment.amountPaise && before.balancePaise > 0 &&
+        before.status in ["pending", "overdue", "partial"] &&
+        before.totalPaidPaise + before.balancePaise == before.amountPaise &&
+        after.lastPaymentId == documentId &&
+        after.totalPaidPaise == before.totalPaidPaise + payment.amountPaise &&
+        after.balancePaise == before.balancePaise - payment.amountPaise &&
+        after.status == (after.balancePaise == 0 ? "paid" : "partial") &&
+        after.diff(before).affectedKeys().hasOnly(["totalPaidPaise", "balancePaise", "status", "lastPaymentId", "updatedAt"]);
+    }
+
     // Profiles are private. Membership and roles, rather than profile fields,
     // authorize every workspace resource.
     match /users/{userId} {
@@ -515,6 +633,32 @@ service cloud.firestore {
       allow create: if validWorkspaceDocument() &&
         hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]) &&
         validDepositLedger(documentId);
+      allow update, delete: if false;
+    }
+    match /propertyBills/{documentId} {
+      allow read: if isMember(resource.data.workspaceId);
+      allow create: if validBillShape(request.resource.data) &&
+        hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]) &&
+        validBillRelationships(request.resource.data) &&
+        request.resource.data.createdBy == request.auth.uid &&
+        request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time &&
+        request.resource.data.totalPaidPaise == 0 &&
+        request.resource.data.balancePaise == request.resource.data.amountPaise &&
+        request.resource.data.lastPaymentId == null &&
+        request.resource.data.status == expectedBillStatus(request.resource.data);
+      allow update: if hasRole(resource.data.workspaceId, ["owner", "manager", "accountant"]) &&
+        validBillShape(request.resource.data) && validBillShape(resource.data) &&
+        validBillRelationships(request.resource.data) &&
+        (validBillMetadataUpdate() || validBillPaymentUpdate(documentId));
+      allow delete: if false;
+    }
+    match /propertyBillPayments/{documentId} {
+      // A transaction may read its absent UUID; existing records remain scoped.
+      allow get: if signedIn() && (resource == null || isMember(resource.data.workspaceId));
+      allow list: if isMember(resource.data.workspaceId);
+      allow create: if validBillPaymentShape(request.resource.data, documentId) &&
+        hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]) &&
+        validBillPaymentBundle(documentId);
       allow update, delete: if false;
     }
     match /ebBills/{documentId} { allow read: if isMember(resource.data.workspaceId); allow create: if validWorkspaceDocument() && hasRole(request.resource.data.workspaceId, ["owner", "manager", "accountant"]); allow update: if immutableWorkspace() && hasRole(resource.data.workspaceId, ["owner", "manager", "accountant"]); allow delete: if hasRole(resource.data.workspaceId, ["owner"]); }

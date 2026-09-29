@@ -11,6 +11,7 @@ import { ReceiptPage } from '../features/rent/receipt-page';
 import { ReceiptsPage } from '../features/rent/receipts-page';
 import { TenantLedgerPage } from '../features/rent/tenant-ledger-page';
 import { DashboardRentMetrics } from '../features/rent/dashboard-rent-metrics';
+import { BillsPage } from '../features/bills/bills-page';
 import { listenAllUnits, listenProperties, type Unit } from '../features/properties/property-repository';
 
 type IconName = 'grid' | 'building' | 'users' | 'wallet' | 'receipt' | 'book' | 'chart' | 'bell' | 'settings' | 'plus' | 'search' | 'menu';
@@ -31,20 +32,24 @@ export function AppShell({ workspace, owner, onLogout }: { workspace: WorkspaceA
   const [tenantId, setTenantId] = useState<string | null>(null);
   const [ledgerTenantId, setLedgerTenantId] = useState<string | null>(null);
   const [receiptPaymentId, setReceiptPaymentId] = useState<string | null>(null);
+  const [billPropertyId, setBillPropertyId] = useState<string | null>(null);
   useEffect(() => {
     const openTenant = (event: Event) => { setTenantId((event as CustomEvent<{ tenantId: string }>).detail.tenantId); setPage('Tenant Detail'); setDrawer(false); };
     const openLedger = (event: Event) => { setLedgerTenantId((event as CustomEvent<{ tenantId: string }>).detail.tenantId); setPage('Tenant Ledger'); setDrawer(false); };
+    const openPropertyBills = (event: Event) => { setBillPropertyId((event as CustomEvent<{ propertyId: string }>).detail.propertyId); setPage('Bills & Taxes'); setDrawer(false); };
     window.addEventListener('creovy:view-tenant', openTenant);
     window.addEventListener('creovy:view-ledger', openLedger);
-    return () => { window.removeEventListener('creovy:view-tenant', openTenant); window.removeEventListener('creovy:view-ledger', openLedger); };
+    window.addEventListener('creovy:view-property-bills', openPropertyBills);
+    return () => { window.removeEventListener('creovy:view-tenant', openTenant); window.removeEventListener('creovy:view-ledger', openLedger); window.removeEventListener('creovy:view-property-bills', openPropertyBills); };
   }, []);
-  const navigate = (name: string) => { setPage(name); setDrawer(false); if (name === 'Tenant Ledger') setLedgerTenantId(null); };
+  const navigate = (name: string) => { setPage(name); setDrawer(false); if (name === 'Tenant Ledger') setLedgerTenantId(null); if (name === 'Bills & Taxes') setBillPropertyId(null); };
   const viewReceipt = (paymentId: string) => { setPreviousPage(page); setReceiptPaymentId(paymentId); setPage('Receipt Detail'); };
   const viewLedger = (id: string) => { setLedgerTenantId(id); setPage('Tenant Ledger'); };
   const content = page === 'Properties' ? <PropertiesPage workspaceId={workspace.id} ownerName={owner} role={workspace.role} />
     : page === 'Tenants' ? <TenantsPage workspaceId={workspace.id} role={workspace.role} />
     : page === 'Tenant Detail' && tenantId ? <TenantDetailRoute workspaceId={workspace.id} role={workspace.role} tenantId={tenantId} back={() => navigate('Properties')} />
     : page === 'Advances' ? <AdvancesPage workspaceId={workspace.id} role={workspace.role} />
+    : page === 'Bills & Taxes' ? <BillsPage workspaceId={workspace.id} role={workspace.role} initialPropertyId={billPropertyId} />
     : page === 'Rent Collection' ? <RentPage workspaceId={workspace.id} viewReceipt={viewReceipt} />
     : page === 'Receipts' ? <ReceiptsPage workspaceId={workspace.id} viewReceipt={viewReceipt} />
     : page === 'Tenant Ledger' ? <TenantLedgerPage workspaceId={workspace.id} initialTenantId={ledgerTenantId} viewReceipt={viewReceipt} />
