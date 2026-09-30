@@ -16,13 +16,12 @@ String receiptPeriod(String value) => RegExp(r'^\d{4}-\d{2}$').hasMatch(value) ?
 
 // package:pdf does not shape Tamil vowel signs and conjuncts. Flutter's text
 // engine does; rasterize only variable receipt values with the bundled font.
-Future<pw.Widget> shapedReceiptValue(String value) async {
-  const width = 300.0;
+Future<pw.Widget> shapedReceiptValue(String value, {double width = 300, TextAlign alignment = TextAlign.right, double fontSize = 11}) async {
   const scale = 3.0;
   final painter = TextPainter(
-    text: TextSpan(text: value, style: const TextStyle(fontFamily: 'CreovyReceiptTamil', fontSize: 11, fontWeight: FontWeight.w600, color: Colors.black)),
+    text: TextSpan(text: value, style: TextStyle(fontFamily: 'CreovyReceiptTamil', fontSize: fontSize, fontWeight: FontWeight.w600, color: Colors.black)),
     textDirection: ui.TextDirection.ltr,
-    textAlign: TextAlign.right,
+    textAlign: alignment,
   )..layout(maxWidth: width);
   final recorder = ui.PictureRecorder();
   final canvas = ui.Canvas(recorder)..scale(scale);

@@ -244,3 +244,127 @@ export const businessDefaults = {
   timezone: 'Asia/Kolkata',
   dateFormat: 'DD/MM/YYYY',
 } as const;
+
+/** Inclusive Asia/Kolkata calendar-day range. Stock metrics remain current, not historical snapshots. */
+export interface ReportFilters {
+  from?: TimestampValue;
+  through?: TimestampValue;
+  propertyId?: string;
+  unitId?: string;
+  tenantId?: string;
+  agreementId?: string;
+  rentStatus?: RentDueStatus;
+  billType?: PropertyBillType;
+  expenseCategory?: PropertyExpenseCategory;
+}
+
+export interface ReportMoneyGroup { key: string; amountPaise: number; count: number }
+export interface RentReport {
+  expectedRentPaise: number;
+  rentCollectedPaise: number;
+  collectedAgainstExpectedPaise: number;
+  outstandingPaise: number;
+  overduePaise: number;
+  collectionRatePercent: number;
+  dueCount: number;
+  paymentCount: number;
+  asOfBusinessDate: string;
+}
+export interface ExpenseReport {
+  totalExpensesPaise: number;
+  expenseCount: number;
+  byCategory: ReportMoneyGroup[];
+  byProperty: ReportMoneyGroup[];
+  byUnit: ReportMoneyGroup[];
+}
+export interface BillsReport {
+  billsRaisedPaise: number;
+  billsPaidPaise: number;
+  billsOutstandingPaise: number;
+  billsOverduePaise: number;
+  paymentsByBillType: ReportMoneyGroup[];
+  billCount: number;
+  paymentCount: number;
+  asOfBusinessDate: string;
+}
+export interface DepositReport {
+  depositAgreedPaise: number;
+  depositReceivedPaise: number;
+  depositRefundedPaise: number;
+  depositCurrentlyHeldPaise: number;
+  transactionCount: number;
+}
+export interface OccupancyReport {
+  totalRentableUnits: number;
+  occupiedUnits: number;
+  vacantUnits: number;
+  maintenanceUnits: number;
+  inactiveUnits: number;
+  occupancyRatePercent: number;
+  activeTenants: number;
+  activeAgreements: number;
+  upcomingAgreements: number;
+  endedAgreements: number;
+}
+export interface PortfolioSummary {
+  rent: RentReport;
+  expenses: ExpenseReport;
+  bills: BillsReport;
+  deposits: DepositReport;
+  occupancy: OccupancyReport;
+  netPropertyCashFlowPaise: number;
+}
+export interface PropertyPerformanceRow {
+  propertyId: string;
+  propertyName: string;
+  expectedRentPaise: number;
+  rentCollectedPaise: number;
+  outstandingPaise: number;
+  propertyExpensesPaise: number;
+  netCashFlowPaise: number;
+  totalRentableUnits: number;
+  occupiedUnits: number;
+  occupancyRatePercent: number;
+}
+export interface ReportHistoryRow {
+  id: string;
+  agreementId: string;
+  propertyId: string;
+  unitId: string;
+  periodKey: string;
+  amountPaise: number;
+  paidPaise?: number;
+  balancePaise?: number;
+  date: TimestampValue;
+}
+export interface TenantRentReport {
+  tenantId: string;
+  tenantName: string;
+  rent: RentReport;
+  dues: ReportHistoryRow[];
+  payments: ReportHistoryRow[];
+}
+/** Current due snapshot enriched with workspace-owned context for report drill-downs. */
+export interface ReportRentRow {
+  dueId: string;
+  tenantId: string;
+  tenantName: string;
+  agreementId: string;
+  propertyId: string;
+  propertyName: string;
+  unitId: string;
+  unitName: string;
+  periodKey: string;
+  dueDate: TimestampValue;
+  expectedPaise: number;
+  paidPaise: number;
+  balancePaise: number;
+  status: RentDueStatus;
+}
+export interface MonthlyCashFlowRow {
+  periodKey: string;
+  expectedRentPaise: number;
+  rentCollectedPaise: number;
+  propertyExpensesPaise: number;
+  netCashFlowPaise: number;
+}

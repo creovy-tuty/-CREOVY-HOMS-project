@@ -1,0 +1,30 @@
+@media screen {
+  .creovy-report-print { display: none; }
+}
+
+@media print {
+  @page { size: A4 portrait; margin: 15mm 13mm 17mm; }
+  body > *:not(.creovy-report-print) { display: none !important; }
+  body { margin: 0 !important; background: white !important; color: #172035 !important; }
+  .creovy-report-print { display: block !important; font-family: Arial, sans-serif; font-size: 9pt; line-height: 1.38; color: #172035; }
+  .report-heading { border-bottom: 2px solid #5b39c8; padding-bottom: 12px; margin-bottom: 12px; }
+  .report-heading h1 { margin: 4px 0; font-size: 19pt; font-weight: 700; }
+  .report-heading p { margin: 0; color: #58647b; }
+  .report-brand { color: #5b39c8 !important; font-size: 10pt; font-weight: 800; letter-spacing: .16em; }
+  .report-scope { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px 18px; padding: 10px 12px; background: #f4f2fb; border-radius: 7px; }
+  .report-scope span { overflow-wrap: anywhere; }
+  .report-scope b { color: #58647b; margin-right: 5px; }
+  .report-section { margin-top: 18px; break-inside: auto; }
+  .report-section h2 { font-size: 11pt; margin: 0 0 8px; color: #372580; break-after: avoid; }
+  .report-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 0; }
+  .report-metrics > div { border: 1px solid #e2e5ed; border-radius: 6px; padding: 7px 9px; break-inside: avoid; }
+  .report-metrics dt { color: #58647b; font-size: 7.5pt; }
+  .report-metrics dd { margin: 2px 0 0; font-size: 10pt; font-weight: 700; overflow-wrap: anywhere; }
+  .report-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 7.5pt; }
+  .report-table thead { display: table-header-group; }
+  .report-table th { background: #f4f2fb; color: #372580; text-align: left; padding: 7px 5px; border-bottom: 1px solid #d4d9e6; }
+  .report-table td { padding: 6px 5px; border-bottom: 1px solid #e7eaf0; vertical-align: top; overflow-wrap: anywhere; }
+  .report-table tr { break-inside: avoid; page-break-inside: avoid; }
+  .report-note { color: #58647b; font-size: 8pt; margin-top: 10px; break-inside: avoid; }
+  .report-footer { position: fixed; bottom: -11mm; left: 0; right: 0; border-top: 1px solid #d4d9e6; padding-top: 5px; color: #68738a; font-size: 7pt; }
+}
